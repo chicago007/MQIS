@@ -139,30 +139,43 @@ def _naver_index_ohlcv(symbol: str, count: int = 520) -> pd.DataFrame:
         rows = []
 
     if not rows:
-        url = (
-            "https://fchart.stock.naver.com/sise.nhn"
-            f"?symbol={symbol}&timeframe=day&count={count}&requestType=0"
-        )
-        resp = requests.get(url, headers=NAVER_HEADERS, timeout=20)
+        df = _naver_fchart_ohlcv(symbol, count=count)
+        if not df.empty:
+            return df
+        return pd.DataFrame()
+    df = pd.DataFrame(rows).set_index("Date").sort_index()
+    return _normalize_ohlcv(df)
+
+
+def _naver_fchart_ohlcv(symbol: str, count: int = 220) -> pd.DataFrame:
+    url = (
+        "https://fchart.stock.naver.com/sise.nhn"
+        f"?symbol={symbol}&timeframe=day&count={count}&requestType=0"
+    )
+    try:
+        resp = requests.get(url, headers=NAVER_HEADERS, timeout=15)
         resp.raise_for_status()
         xml_text = resp.content.decode("euc-kr", errors="replace")
         xml_text = xml_text.replace('encoding="EUC-KR"', 'encoding="UTF-8"')
         root = ET.fromstring(xml_text)
-        for item in root.findall(".//item"):
-            raw = item.get("data") or ""
-            parts = raw.split("|")
-            if len(parts) < 6:
-                continue
-            rows.append(
-                {
-                    "Date": pd.to_datetime(parts[0], format="%Y%m%d"),
-                    "Open": float(parts[1]),
-                    "High": float(parts[2]),
-                    "Low": float(parts[3]),
-                    "Close": float(parts[4]),
-                    "Volume": float(parts[5]),
-                }
-            )
+    except Exception:
+        return pd.DataFrame()
+    rows: list[dict[str, Any]] = []
+    for item in root.findall(".//item"):
+        raw = item.get("data") or ""
+        parts = raw.split("|")
+        if len(parts) < 6:
+            continue
+        rows.append(
+            {
+                "Date": pd.to_datetime(parts[0], format="%Y%m%d"),
+                "Open": float(parts[1]),
+                "High": float(parts[2]),
+                "Low": float(parts[3]),
+                "Close": float(parts[4]),
+                "Volume": float(parts[5]),
+            }
+        )
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows).set_index("Date").sort_index()
@@ -543,6 +556,40 @@ def fetch_korea_flows() -> dict[str, Any]:
     futures = fetch_kr_futures_flows()
     unit = futures.attrs.get("unit", "계약") if not futures.empty else "계약"
     return {"spot": spot, "futures": futures, "futures_unit": unit}
+
+
+def fetch_etf_universe() -> list[dict[str, str]]:
+    url = "https://finance.naver.com/api/sise/etfItemList.nhn"
+    try:
+        payload = requests.get(url, headers=NAVER_HEADERS, timeout=20).json()
+        items = payload.get("result", {}).get("etfItemList") or []
+    except Exception:
+        return []
+    out = []
+    for item in items:
+        code = str(item.get("itemcode") or "").strip()
+        name = str(item.get("itemname") or "").strip()
+        if code and name:
+            out.append({"code": code, "name": name})
+    return out
+
+
+def fetch_etf_prices(codes: list[str], count: int = 220) -> dict[str, pd.DataFrame]:
+    out: dict[str, pd.DataFrame] = {}
+    if not codes:
+        return out
+
+    def _one(code: str) -> tuple[str, pd.DataFrame]:
+        try:
+            return code, _naver_fchart_ohlcv(code, count=count)
+        except Exception:
+            return code, pd.DataFrame()
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        for code, df in pool.map(_one, codes):
+            if df is not None and not df.empty:
+                out[code] = df
+    return out
 
 
 def latest_asof(price_map: dict[str, pd.DataFrame]) -> dict[str, str]:

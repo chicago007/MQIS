@@ -11,6 +11,8 @@ __pycache__/
 .idea/
 .vscode/
 *.log
+.agents/
+.tmp_ocr/
 .pytest_cache/
 .mypy_cache/
 dist/

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from mqis.pipeline import build_snapshot
+import sys
+
+from mqis import __version__
+from mqis.pipeline import build_sector_snapshot, build_snapshot
+from mqis.sectors import SECTORS
 
 
 def _pct(value: float) -> str:
@@ -28,9 +32,47 @@ def _compact(value: float) -> str:
     return _num(value)
 
 
+def _억원(value: float) -> str:
+    if value is None or value != value:
+        return "-"
+    return f"{value / 1e8:,.1f}"
+
+
+def _print_sectors() -> None:
+    snap = build_sector_snapshot()
+    print(
+        f"MQIS v{__version__}  섹터 퀀트  {snap['generated_at']}  종가 {snap['asof']}  {snap['count']}종"
+    )
+    print()
+    print(f"{'섹터':<10} {'종목':>4} {'1D평균':>8} {'5D평균':>8} {'10D평균':>8} {'1D대금억':>10} {'이격20':>8}")
+    for sector in SECTORS:
+        block = snap["summaries"][sector]
+        print(
+            f"{sector:<10} {block['count']:>4} {_pct(block['ret_1d']):>8} "
+            f"{_pct(block['ret_5d']):>8} {_pct(block['ret_10d']):>8} "
+            f"{_억원(block['to_1d']):>10} {_num(block['이격도20']):>8}"
+        )
+    print()
+    for sector in SECTORS:
+        rows = snap["by_sector"].get(sector) or []
+        if not rows:
+            continue
+        print(f"=== {sector} ===")
+        for row in rows:
+            print(
+                f"  {row['code']:<8} {row['name']:<28} "
+                f"1D {_pct(row['ret_1d'])} {_억원(row['to_1d'])}억  "
+                f"이격 {_num(row['이격도20'])}/{_num(row['이격도60'])}/{_num(row['이격도120'])}"
+            )
+        print()
+
+
 def main() -> None:
+    if "--sectors" in sys.argv:
+        _print_sectors()
+        return
     snap = build_snapshot()
-    print(f"MQIS (Market Quant Investment System)  {snap['generated_at']}")
+    print(f"MQIS v{__version__} (Market Quant Investment System)  {snap['generated_at']}")
     print(f"미국 종가 {snap['asof']['us']}  |  한국 종가 {snap['asof']['kr']}")
     print()
     print("=== 1. 시장 ===")
