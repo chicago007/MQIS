@@ -302,24 +302,22 @@ def main() -> None:
 
     page = st.sidebar.radio("화면", ("시장·지수", "섹터 퀀트"), index=0)
     st.sidebar.caption(f"v{__version__}")
-    top_l, top_r = st.columns([4, 1])
-    with top_l:
-        st.title("MQIS")
+    if st.sidebar.button("데이터 새로고침", use_container_width=True):
         if page == "섹터 퀀트":
-            st.caption(
-                f"Market Quant Investment System  ·  v{__version__}  ·  섹터별 ETF 수익률·거래대금·이격도"
-            )
+            load_sector_snapshot.clear()
         else:
-            st.caption(
-                f"Market Quant Investment System  ·  v{__version__}  ·  시장 스냅샷과 미국·한국 주요 지수 퀀트 시그널"
-            )
-    with top_r:
-        if st.button("데이터 새로고침", use_container_width=True):
-            if page == "섹터 퀀트":
-                load_sector_snapshot.clear()
-            else:
-                load_snapshot.clear()
-            st.rerun()
+            load_snapshot.clear()
+        st.rerun()
+
+    st.title("MQIS")
+    if page == "섹터 퀀트":
+        st.caption(
+            f"Market Quant Investment System  ·  v{__version__}  ·  섹터별 ETF 수익률·거래대금·이격도"
+        )
+    else:
+        st.caption(
+            f"Market Quant Investment System  ·  v{__version__}  ·  시장 스냅샷과 미국·한국 주요 지수 퀀트 시그널"
+        )
 
     if page == "섹터 퀀트":
         render_sector_page()

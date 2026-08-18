@@ -2,7 +2,7 @@
 
 미국·한국 지수, 거시 지표, 한국 수급, 퀀트 시그널, 한국 ETF 섹터 퀀트를 한 앱에서 보는 투자 대시보드입니다.
 
-현재 버전: **0.2.0** (`mqis/__init__.py`의 `__version__`). 웹 화면 상단·사이드바·하단과 CLI에 같습니다.
+현재 버전: **0.2.1** (`mqis/__init__.py`의 `__version__`). 웹 화면 상단·사이드바·하단과 CLI에 같습니다.
 
 ## 실행
 
@@ -24,7 +24,7 @@ python -m mqis
 python -m mqis --sectors      # 섹터 ETF
 ```
 
-캐시 TTL은 5분입니다. 화면에서 **데이터 새로고침**을 누르면 다시 수집합니다.
+캐시 TTL은 5분입니다. **왼쪽 사이드바**의 **데이터 새로고침**을 누르면 캐시를 비우고 다시 수집합니다. 브라우저 새로고침(F5)만으로는 5분 이내 캐시가 그대로 쓰일 수 있습니다.
 
 선택: FRED API를 쓰려면 `FRED_API_KEY`를 환경변수로 넣습니다.
 
@@ -35,6 +35,7 @@ python -m mqis --sectors      # 섹터 ETF
 | `app.py` | Streamlit UI |
 | `mqis/` | 수집·지표·시그널·섹터·파이프라인 |
 | `mqis/data/etf_universe.txt` | 섹터 퀀트에 쓰는 ETF 목록 |
+| `gemini_web/sector_quant.py` | Gemini Web 전용 독립 섹터 퀀트 (MQIS와 분리 실행) |
 | `docs/` | 개발계획서, 버전관리, 아키텍처, 데이터소스 |
 
 문서 목록은 [docs/README.md](docs/README.md)를 참고하세요.

@@ -6,6 +6,20 @@ MQIS (Market Quant Investment System) 변경 이력입니다.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-08-18
+
+### Added
+
+- `gemini_web/sector_quant.py`: Gemini Web에서 붙여 넣어 실행하는 독립 섹터 퀀트 스크립트 (MQIS 패키지와 분리)
+
+### Fixed
+
+- **데이터 새로고침** 버튼을 사이드바로 옮겨 본문 상단에서 글자가 잘리던 문제 수정
+
+### Changed
+
+- README: 캐시·새로고침 동작과 사이드바 버튼 위치 안내 보강
+
 ## [0.2.0] — 2026-08-17
 
 ### Added
