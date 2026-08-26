@@ -41,7 +41,7 @@ def _억원(value: float) -> str:
 def _print_sectors() -> None:
     snap = build_sector_snapshot()
     print(
-        f"MQIS v{__version__}  섹터 퀀트  {snap['generated_at']}  종가 {snap['asof']}  {snap['count']}종"
+        f"MQIS v{__version__}  섹터분석  {snap['generated_at']}  종가 {snap['asof']}  {snap['count']}종"
     )
     print()
     print(f"{'섹터':<10} {'종목':>4} {'1D평균':>8} {'5D평균':>8} {'10D평균':>8} {'1D대금억':>10} {'이격20':>8}")

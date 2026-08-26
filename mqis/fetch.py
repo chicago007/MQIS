@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -11,6 +12,7 @@ from typing import Any, Callable
 import pandas as pd
 import requests
 import yfinance as yf
+from lxml import html as lxml_html
 
 from mqis.config import (
     FLOW_LOOKBACK_DAYS,
@@ -571,6 +573,61 @@ def fetch_etf_universe() -> list[dict[str, str]]:
         name = str(item.get("itemname") or "").strip()
         if code and name:
             out.append({"code": code, "name": name})
+    return out
+
+
+def fetch_etf_holdings(etf_code: str) -> list[dict[str, Any]]:
+    """네이버 종목 페이지의 ETF 주요 구성자산(최대 10종)을 가져온다."""
+    code = str(etf_code or "").strip()
+    if not code:
+        return []
+    url = f"https://finance.naver.com/item/main.naver?code={code}"
+    try:
+        resp = requests.get(url, headers=NAVER_HEADERS, timeout=20)
+        resp.raise_for_status()
+        resp.encoding = "utf-8"
+        root = lxml_html.fromstring(resp.text)
+    except Exception:
+        return []
+
+    out: list[dict[str, Any]] = []
+    for table in root.xpath("//table"):
+        headers = [th.text_content().strip() for th in table.xpath(".//th")]
+        header_text = " ".join(headers)
+        if "구성종목" not in header_text or "구성비중" not in header_text:
+            continue
+        for tr in table.xpath(".//tr"):
+            tds = tr.xpath("./td")
+            if len(tds) < 3:
+                continue
+            links = tds[0].xpath(".//a[contains(@href, 'code=')]")
+            if not links:
+                continue
+            href = links[0].get("href") or ""
+            match = re.search(r"code=([0-9A-Za-z]+)", href)
+            if not match:
+                continue
+            stock_code = match.group(1)
+            name = " ".join(links[0].text_content().split())
+            shares_raw = " ".join(tds[1].text_content().split()).replace(",", "")
+            weight_raw = " ".join(tds[2].text_content().split()).replace("%", "").replace(",", "")
+            try:
+                shares = float(shares_raw) if shares_raw not in {"", "-"} else float("nan")
+            except ValueError:
+                shares = float("nan")
+            try:
+                weight = float(weight_raw) / 100.0 if weight_raw not in {"", "-"} else float("nan")
+            except ValueError:
+                weight = float("nan")
+            out.append(
+                {
+                    "code": stock_code,
+                    "name": name,
+                    "shares": shares,
+                    "weight": weight,
+                }
+            )
+        break
     return out
 
 

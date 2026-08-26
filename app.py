@@ -7,7 +7,7 @@ import streamlit as st
 
 from mqis import __version__
 from mqis.config import CACHE_TTL_SEC, INVERT_TONE_KEYS, MACRO_GROUPS
-from mqis.pipeline import build_sector_snapshot, build_snapshot
+from mqis.pipeline import build_etf_holding_snapshot, build_sector_snapshot, build_snapshot
 from mqis.sectors import SECTOR_THEMES, SECTORS
 
 st.set_page_config(
@@ -62,6 +62,216 @@ def load_snapshot() -> dict:
 @st.cache_data(ttl=CACHE_TTL_SEC, show_spinner="섹터 ETF 시세를 가져오는 중...")
 def load_sector_snapshot() -> dict:
     return build_sector_snapshot()
+
+
+@st.cache_data(ttl=CACHE_TTL_SEC, show_spinner="ETF 구성종목·시세를 가져오는 중...")
+def load_etf_holding_snapshot(etf_code: str, etf_name: str) -> dict:
+    return build_etf_holding_snapshot(etf_code, etf_name)
+
+
+def _etf_metric_column_config() -> dict:
+    return {
+        "종가": st.column_config.NumberColumn(format="%.0f"),
+        "1D": st.column_config.NumberColumn(format="percent"),
+        "5D": st.column_config.NumberColumn(format="percent"),
+        "10D": st.column_config.NumberColumn(format="percent"),
+        "1D대금(억)": st.column_config.NumberColumn(format="%.1f"),
+        "5D대금(억)": st.column_config.NumberColumn(format="%.1f"),
+        "10D대금(억)": st.column_config.NumberColumn(format="%.1f"),
+        "이격도20": st.column_config.NumberColumn(format="%.2f"),
+        "이격도60": st.column_config.NumberColumn(format="%.2f"),
+        "이격도120": st.column_config.NumberColumn(format="%.2f"),
+        "구성비중": st.column_config.NumberColumn(format="percent"),
+        "주식수": st.column_config.NumberColumn(format="%.0f"),
+    }
+
+
+def _metric_table_rows(rows: list[dict], *, include_weight: bool = False) -> list[dict]:
+    table = []
+    for row in rows:
+        item = {
+            "종목코드": row["code"],
+            "종목명": row["name"],
+        }
+        if include_weight:
+            item["구성비중"] = _num_or_none(row.get("weight"))
+            item["주식수"] = _num_or_none(row.get("shares"))
+        else:
+            item["테마"] = row.get("theme", "-")
+        item.update(
+            {
+                "종가": _num_or_none(row["close"]),
+                "1D": _num_or_none(row["ret_1d"]),
+                "1D대금(억)": _억원_num(row["to_1d"]),
+                "5D": _num_or_none(row["ret_5d"]),
+                "5D대금(억)": _억원_num(row["to_5d"]),
+                "10D": _num_or_none(row["ret_10d"]),
+                "10D대금(억)": _억원_num(row["to_10d"]),
+                "이격도20": _num_or_none(row["이격도20"]),
+                "이격도60": _num_or_none(row["이격도60"]),
+                "이격도120": _num_or_none(row["이격도120"]),
+                "배열": row["배열"],
+            }
+        )
+        table.append(item)
+    return table
+
+
+def render_sector_page() -> None:
+    snap = load_sector_snapshot()
+    st.caption(
+        f"생성 {snap['generated_at']}  ·  ETF 종가 {snap['asof']}  ·  "
+        f"{snap['count']}종  ·  동일명 {snap.get('dropped', 0)}종 제외  ·  지정 목록  ·  5분 캐시"
+    )
+    st.header("섹터분석")
+    st.caption(
+        "붙여 넣은 종목 목록만 사용합니다. 대표 섹터로 나누고, 해당하지 않으면 기타입니다. "
+        "운용사 접두어를 뺀 종목명이 같으면 당일 거래대금이 큰 ETF만 남깁니다."
+    )
+
+    summary_rows = []
+    for sector in SECTORS:
+        block = snap["summaries"][sector]
+        themes = " · ".join(SECTOR_THEMES[sector])
+        summary_rows.append(
+            {
+                "섹터": sector,
+                "테마": themes,
+                "종목수": int(block["count"]),
+                "1D평균": _num_or_none(block["ret_1d"]),
+                "5D평균": _num_or_none(block["ret_5d"]),
+                "10D평균": _num_or_none(block["ret_10d"]),
+                "1D대금합(억)": _억원_num(block["to_1d"]),
+                "평균이격20": _num_or_none(block["이격도20"]),
+            }
+        )
+    st.dataframe(
+        pd.DataFrame(summary_rows),
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "종목수": st.column_config.NumberColumn(format="%d"),
+            "1D평균": st.column_config.NumberColumn(format="percent"),
+            "5D평균": st.column_config.NumberColumn(format="percent"),
+            "10D평균": st.column_config.NumberColumn(format="percent"),
+            "1D대금합(억)": st.column_config.NumberColumn(format="%.1f"),
+            "평균이격20": st.column_config.NumberColumn(format="%.2f"),
+        },
+    )
+    st.caption(
+        "섹터 평균 수익률은 해당 섹터 ETF를 동일 가중합니다. 1D 대금은 종가×거래량 합(억원)입니다. "
+        "이격도 = (종가 ÷ 이동평균) × 100."
+    )
+
+    tabs = st.tabs([f"{name} ({snap['summaries'][name]['count']})" for name in SECTORS])
+    selection_candidates: list[dict[str, str]] = []
+    for tab, sector in zip(tabs, SECTORS):
+        with tab:
+            rows = snap["by_sector"].get(sector) or []
+            if not rows:
+                st.info("분류된 ETF가 없습니다.")
+                continue
+            table_df = pd.DataFrame(_metric_table_rows(rows))
+            selection = st.dataframe(
+                table_df,
+                width="stretch",
+                hide_index=True,
+                column_config=_etf_metric_column_config(),
+                key=f"sector_etf_table_{sector}",
+                on_select="rerun",
+                selection_mode="single-row",
+            )
+            st.caption(
+                f"포함 테마: {', '.join(SECTOR_THEMES[sector])}  ·  "
+                "1·5·10일 대금은 각 기간 거래대금 합계  ·  "
+                "이격도 100 초과면 이평 위, 정배열은 20>60>120MA  ·  "
+                "표는 당일 거래대금 큰 순  ·  행을 클릭하면 아래에서 구성종목을 봅니다"
+            )
+            selected_rows = selection.selection.rows if selection and selection.selection else []
+            if selected_rows:
+                picked = rows[selected_rows[0]]
+                selection_candidates.append(
+                    {
+                        "code": picked["code"],
+                        "name": picked["name"],
+                        "sector": sector,
+                    }
+                )
+
+    if selection_candidates:
+        prev = st.session_state.get("sector_selected_etf")
+        newer = [
+            item
+            for item in selection_candidates
+            if not prev or item["code"] != prev.get("code") or item.get("sector") != prev.get("sector")
+        ]
+        st.session_state["sector_selected_etf"] = newer[-1] if newer else selection_candidates[-1]
+
+    st.subheader("ETF 구성종목 분석")
+    selected = st.session_state.get("sector_selected_etf")
+    if not selected:
+        st.info("위 섹터 표에서 ETF 행을 선택하면 구성종목과 종목별 분석표가 여기에 표시됩니다.")
+        return
+
+    # 선택 ETF가 스냅샷에 없으면(캐시 갱신 등) 안내
+    etf_codes = {row["code"] for row in (snap.get("rows") or [])}
+    if selected["code"] not in etf_codes:
+        st.session_state.pop("sector_selected_etf", None)
+        st.info("위 섹터 표에서 ETF 행을 다시 선택해 주세요.")
+        return
+
+    holding_snap = load_etf_holding_snapshot(selected["code"], selected["name"])
+
+    st.caption(
+        f"선택 {selected['name']} ({selected['code']})"
+        + (f"  ·  {selected['sector']}" if selected.get("sector") else "")
+        + f"  ·  구성 {len(holding_snap.get('holdings') or [])}종  ·  "
+        f"분석 {holding_snap.get('count', 0)}종  ·  종가 {holding_snap.get('asof', '-')}  ·  "
+        f"생성 {holding_snap.get('generated_at', '-')}"
+    )
+
+    holdings = holding_snap.get("holdings") or []
+    if not holdings:
+        st.warning("구성종목을 가져오지 못했습니다. 네이버 구성자산이 없거나 일시 오류일 수 있습니다.")
+        return
+
+    holding_table = []
+    for item in holdings:
+        holding_table.append(
+            {
+                "종목코드": item["code"],
+                "종목명": item["name"],
+                "구성비중": _num_or_none(item.get("weight")),
+                "주식수": _num_or_none(item.get("shares")),
+            }
+        )
+    st.markdown("**구성종목**")
+    st.dataframe(
+        pd.DataFrame(holding_table),
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "구성비중": st.column_config.NumberColumn(format="percent"),
+            "주식수": st.column_config.NumberColumn(format="%.0f"),
+        },
+    )
+    st.caption("네이버 금융 ETF 주요 구성자산(최대 10종, 전일 기준)입니다.")
+
+    analysis_rows = holding_snap.get("rows") or []
+    st.markdown("**종목별 분석표**")
+    if not analysis_rows:
+        st.info("구성종목 시세를 가져오지 못했습니다.")
+        return
+    st.dataframe(
+        pd.DataFrame(_metric_table_rows(analysis_rows, include_weight=True)),
+        width="stretch",
+        hide_index=True,
+        column_config=_etf_metric_column_config(),
+    )
+    st.caption(
+        "섹터 ETF 분석표와 같은 지표입니다. 구성비중 큰 순 ·  "
+        "1·5·10일 대금은 각 기간 거래대금 합계 · 이격도 100 초과면 이평 위"
+    )
 
 
 def metric_card(title: str, value: str, delta: str, note: str = "", tone: str = "flat") -> None:
@@ -190,104 +400,6 @@ def _억원_num(value: float) -> float | None:
     return float(value) / 1e8
 
 
-def render_sector_page() -> None:
-    snap = load_sector_snapshot()
-    st.caption(
-        f"생성 {snap['generated_at']}  ·  ETF 종가 {snap['asof']}  ·  "
-        f"{snap['count']}종  ·  동일명 {snap.get('dropped', 0)}종 제외  ·  지정 목록  ·  5분 캐시"
-    )
-    st.header("섹터 퀀트")
-    st.caption(
-        "붙여 넣은 종목 목록만 사용합니다. 대표 섹터로 나누고, 해당하지 않으면 기타입니다. "
-        "운용사 접두어를 뺀 종목명이 같으면 당일 거래대금이 큰 ETF만 남깁니다."
-    )
-
-    summary_rows = []
-    for sector in SECTORS:
-        block = snap["summaries"][sector]
-        themes = " · ".join(SECTOR_THEMES[sector])
-        summary_rows.append(
-            {
-                "섹터": sector,
-                "테마": themes,
-                "종목수": int(block["count"]),
-                "1D평균": _num_or_none(block["ret_1d"]),
-                "5D평균": _num_or_none(block["ret_5d"]),
-                "10D평균": _num_or_none(block["ret_10d"]),
-                "1D대금합(억)": _억원_num(block["to_1d"]),
-                "평균이격20": _num_or_none(block["이격도20"]),
-            }
-        )
-    st.dataframe(
-        pd.DataFrame(summary_rows),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "종목수": st.column_config.NumberColumn(format="%d"),
-            "1D평균": st.column_config.NumberColumn(format="percent"),
-            "5D평균": st.column_config.NumberColumn(format="percent"),
-            "10D평균": st.column_config.NumberColumn(format="percent"),
-            "1D대금합(억)": st.column_config.NumberColumn(format="%.1f"),
-            "평균이격20": st.column_config.NumberColumn(format="%.2f"),
-        },
-    )
-    st.caption(
-        "섹터 평균 수익률은 해당 섹터 ETF를 동일 가중합니다. 1D 대금은 종가×거래량 합(억원)입니다. "
-        "이격도 = (종가 ÷ 이동평균) × 100."
-    )
-
-    tabs = st.tabs([f"{name} ({snap['summaries'][name]['count']})" for name in SECTORS])
-    for tab, sector in zip(tabs, SECTORS):
-        with tab:
-            rows = snap["by_sector"].get(sector) or []
-            if not rows:
-                st.info("분류된 ETF가 없습니다.")
-                continue
-            table = []
-            for row in rows:
-                table.append(
-                    {
-                        "종목코드": row["code"],
-                        "종목명": row["name"],
-                        "테마": row["theme"],
-                        "종가": _num_or_none(row["close"]),
-                        "1D": _num_or_none(row["ret_1d"]),
-                        "1D대금(억)": _억원_num(row["to_1d"]),
-                        "5D": _num_or_none(row["ret_5d"]),
-                        "5D대금(억)": _억원_num(row["to_5d"]),
-                        "10D": _num_or_none(row["ret_10d"]),
-                        "10D대금(억)": _억원_num(row["to_10d"]),
-                        "이격도20": _num_or_none(row["이격도20"]),
-                        "이격도60": _num_or_none(row["이격도60"]),
-                        "이격도120": _num_or_none(row["이격도120"]),
-                        "배열": row["배열"],
-                    }
-                )
-            st.dataframe(
-                pd.DataFrame(table),
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "종가": st.column_config.NumberColumn(format="%.0f"),
-                    "1D": st.column_config.NumberColumn(format="percent"),
-                    "5D": st.column_config.NumberColumn(format="percent"),
-                    "10D": st.column_config.NumberColumn(format="percent"),
-                    "1D대금(억)": st.column_config.NumberColumn(format="%.1f"),
-                    "5D대금(억)": st.column_config.NumberColumn(format="%.1f"),
-                    "10D대금(억)": st.column_config.NumberColumn(format="%.1f"),
-                    "이격도20": st.column_config.NumberColumn(format="%.2f"),
-                    "이격도60": st.column_config.NumberColumn(format="%.2f"),
-                    "이격도120": st.column_config.NumberColumn(format="%.2f"),
-                },
-            )
-            st.caption(
-                f"포함 테마: {', '.join(SECTOR_THEMES[sector])}  ·  "
-                "1·5·10일 대금은 각 기간 거래대금 합계  ·  "
-                "이격도 100 초과면 이평 위, 정배열은 20>60>120MA  ·  "
-                "표는 당일 거래대금 큰 순"
-            )
-
-
 def main() -> None:
     st.markdown(
         """
@@ -300,17 +412,18 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    page = st.sidebar.radio("화면", ("시장·지수", "섹터 퀀트"), index=0)
+    page = st.sidebar.radio("화면", ("시장·지수", "섹터분석"), index=0)
     st.sidebar.caption(f"v{__version__}")
-    if st.sidebar.button("데이터 새로고침", use_container_width=True):
-        if page == "섹터 퀀트":
+    if st.sidebar.button("데이터 새로고침", width="stretch"):
+        if page == "섹터분석":
             load_sector_snapshot.clear()
+            load_etf_holding_snapshot.clear()
         else:
             load_snapshot.clear()
         st.rerun()
 
     st.title("MQIS")
-    if page == "섹터 퀀트":
+    if page == "섹터분석":
         st.caption(
             f"Market Quant Investment System  ·  v{__version__}  ·  섹터별 ETF 수익률·거래대금·이격도"
         )
@@ -319,7 +432,7 @@ def main() -> None:
             f"Market Quant Investment System  ·  v{__version__}  ·  시장 스냅샷과 미국·한국 주요 지수 퀀트 시그널"
         )
 
-    if page == "섹터 퀀트":
+    if page == "섹터분석":
         render_sector_page()
         _render_version_footer()
         return

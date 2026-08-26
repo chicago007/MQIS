@@ -374,3 +374,30 @@ def build_sector_snapshot_payload(
         "before_dedupe": before,
         "asof": max(asof_dates) if asof_dates else "-",
     }
+
+
+def build_holding_analysis_rows(
+    holdings: list[dict[str, Any]],
+    prices: dict[str, pd.DataFrame],
+) -> list[dict[str, Any]]:
+    """구성종목 메타 + 시세로 ETF 분석표와 같은 지표 행을 만든다."""
+    rows: list[dict[str, Any]] = []
+    for item in holdings:
+        meta = {
+            "code": item["code"],
+            "name": item["name"],
+            "sector": "구성",
+            "theme": "구성",
+            "core": item["name"],
+        }
+        row = etf_row(meta, prices.get(item["code"], pd.DataFrame()))
+        if not row:
+            continue
+        row["weight"] = item.get("weight", float("nan"))
+        row["shares"] = item.get("shares", float("nan"))
+        rows.append(row)
+    rows.sort(
+        key=lambda r: r["weight"] if pd.notna(r.get("weight")) else -1,
+        reverse=True,
+    )
+    return rows
